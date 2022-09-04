@@ -7,7 +7,8 @@ thread_local! {
     static LOCAL_SET: LocalSet = LocalSet::new();
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // holds runtime thread until end of main fn.
     let (_tx, rx) = oneshot::channel::<()>();
 
