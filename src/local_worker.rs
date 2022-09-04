@@ -1,18 +1,7 @@
-//! We use a local worker implementation that does not produce a JoinHandle for spawn_pinned.
-//! This avoids the cost to acquire a JoinHandle.
-//!
-//! See: [tokio-rs/tokio#4819](https://github.com/tokio-rs/tokio/issues/4819)
-//!
-//! We will not be able to produce a meaningful JoinHandle until WebAssembly targets support
-//! unwinding.
-
 use std::cell::RefCell;
 use std::future::Future;
-use std::marker::PhantomData;
 use std::sync::Arc;
 use std::{io, thread};
-
-static DEFAULT_WORKER_NAME: &str = "yew-runtime-worker";
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -44,21 +33,19 @@ impl LocalWorker {
 
         {
             let task_count = task_count.clone();
-            thread::Builder::new()
-                .name(DEFAULT_WORKER_NAME.into())
-                .spawn(move || {
-                    TASK_COUNT.with(move |m| {
-                        *m.borrow_mut() = Some(task_count);
-                    });
+            thread::Builder::new().spawn(move || {
+                TASK_COUNT.with(move |m| {
+                    *m.borrow_mut() = Some(task_count);
+                });
 
-                    LOCAL_SET.with(|local_set| {
-                        local_set.block_on(&rt, async move {
-                            while let Some(m) = rx.next().await {
-                                m();
-                            }
-                        });
+                LOCAL_SET.with(|local_set| {
+                    local_set.block_on(&rt, async move {
+                        while let Some(m) = rx.next().await {
+                            m();
+                        }
                     });
-                })?;
+                });
+            })?;
         }
 
         Ok(Self { task_count, tx })
@@ -100,44 +87,5 @@ impl LocalJobCountGuard {
 impl Drop for LocalJobCountGuard {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct LocalHandle {
-    // This type is not send or sync.
-    _marker: PhantomData<*const ()>,
-    task_count: Arc<AtomicUsize>,
-}
-
-impl LocalHandle {
-    pub fn try_current() -> Option<Self> {
-        // We cache the handle to prevent borrowing RefCell.
-        thread_local! {
-            static LOCAL_HANDLE: Option<LocalHandle> = TASK_COUNT
-            .with(|m| m.borrow().clone())
-            .map(|task_count| LocalHandle { task_count, _marker: PhantomData });
-        }
-
-        LOCAL_HANDLE.with(|m| m.clone())
-    }
-
-    pub fn current() -> Self {
-        Self::try_current().expect("outside of Yew runtime.")
-    }
-
-    pub fn spawn_local<F>(&self, f: F)
-    where
-        F: Future<Output = ()> + 'static,
-    {
-        let guard = LocalJobCountGuard::new(self.task_count.clone());
-
-        LOCAL_SET.with(move |local_set| {
-            local_set.spawn_local(async move {
-                let _guard = guard;
-
-                f.await;
-            })
-        });
     }
 }

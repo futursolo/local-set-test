@@ -4,24 +4,7 @@ use std::{fmt, io};
 
 use once_cell::sync::Lazy;
 
-use crate::local_worker::LocalHandle;
 use crate::local_worker::LocalWorker;
-
-#[inline(always)]
-pub(super) fn spawn_local<F>(f: F)
-where
-    F: Future<Output = ()> + 'static,
-{
-    match LocalHandle::try_current() {
-        Some(m) => {
-            // If within a Yew runtime, use a local handle increases the local task count.
-            m.spawn_local(f);
-        }
-        None => {
-            tokio::task::spawn_local(f);
-        }
-    }
-}
 
 #[derive(Clone)]
 pub(crate) struct Runtime {
@@ -92,70 +75,5 @@ impl Runtime {
     {
         let worker = self.find_least_busy_local_worker();
         worker.spawn_pinned(create_task);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use futures::channel::oneshot;
-    use tokio::test;
-    use tokio::time::timeout;
-
-    use super::*;
-
-    #[test]
-    async fn test_spawn_pinned_least_busy() {
-        let runtime = Runtime::new(2).expect("failed to create runtime.");
-
-        let (tx1, rx1) = oneshot::channel();
-        let (tx2, rx2) = oneshot::channel();
-
-        runtime.spawn_pinned(move || async move {
-            tx1.send(std::thread::current().id())
-                .expect("failed to send!");
-        });
-
-        runtime.spawn_pinned(move || async move {
-            tx2.send(std::thread::current().id())
-                .expect("failed to send!");
-        });
-
-        let result1 = timeout(Duration::from_secs(5), rx1)
-            .await
-            .expect("task timed out")
-            .expect("failed to receive");
-        let result2 = timeout(Duration::from_secs(5), rx2)
-            .await
-            .expect("task timed out")
-            .expect("failed to receive");
-
-        // first task and second task are not on the same thread.
-        assert_ne!(result1, result2);
-    }
-
-    #[test]
-    async fn test_spawn_local_within_send() {
-        let runtime = Runtime::new(1).expect("failed to create runtime.");
-
-        let (tx, rx) = oneshot::channel();
-
-        runtime.spawn_pinned(move || async move {
-            tokio::task::spawn(async move {
-                // tokio::task::spawn_local cannot spawn tasks outside of a local context.
-                //
-                // yew::platform::spawn_local can spawn tasks within a Send task as long as running
-                // under a Yew Runtime.
-                spawn_local(async move {
-                    tx.send(()).expect("failed to send!");
-                })
-            });
-        });
-
-        timeout(Duration::from_secs(5), rx)
-            .await
-            .expect("task timed out")
-            .expect("failed to receive");
     }
 }
