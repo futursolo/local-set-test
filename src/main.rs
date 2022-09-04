@@ -1,9 +1,7 @@
-use std::future::Future;
 use std::thread;
 
-use tokio::sync::mpsc::{self, UnboundedSender};
-use tokio::sync::oneshot;
-use tokio::task::{spawn_local, LocalSet};
+use tokio::sync::mpsc;
+use tokio::task::LocalSet;
 
 type SpawnTask = Box<dyn Send + FnOnce()>;
 
@@ -11,46 +9,22 @@ thread_local! {
     static LOCAL_SET: LocalSet = LocalSet::new();
 }
 
-pub(crate) struct LocalWorker {
-    tx: UnboundedSender<SpawnTask>,
-}
+#[tokio::main]
+async fn main() {
+    let (_tx, mut rx) = mpsc::unbounded_channel::<SpawnTask>();
 
-impl LocalWorker {
-    pub fn new() -> Self {
-        let (tx, mut rx) = mpsc::unbounded_channel::<SpawnTask>();
-
+    thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("failed to create runtime.");
 
-        thread::spawn(move || {
-            LOCAL_SET.with(|local_set| {
-                local_set.block_on(&rt, async move {
-                    while let Some(m) = rx.recv().await {
-                        m();
-                    }
-                });
+        LOCAL_SET.with(|local_set| {
+            local_set.block_on(&rt, async move {
+                while let Some(m) = rx.recv().await {
+                    m();
+                }
             });
         });
-
-        Self { tx }
-    }
-
-    pub fn spawn_pinned<F, Fut>(&self, f: F)
-    where
-        F: 'static + Send + FnOnce() -> Fut,
-        Fut: 'static + Future<Output = ()>,
-    {
-        let _ = self.tx.send(Box::new(move || {
-            spawn_local(async move {
-                f().await;
-            });
-        }));
-    }
-}
-
-#[tokio::main]
-async fn main() {
-    let _worker = LocalWorker::new();
+    });
 }
