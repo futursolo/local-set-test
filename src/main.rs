@@ -52,13 +52,5 @@ impl LocalWorker {
 
 #[tokio::main]
 async fn main() {
-    let worker = LocalWorker::new();
-
-    let (tx, rx) = oneshot::channel();
-
-    worker.spawn_pinned(move || async move {
-        tx.send(()).expect("failed to send!");
-    });
-
-    rx.await.expect("failed to receive");
+    let _worker = LocalWorker::new();
 }
