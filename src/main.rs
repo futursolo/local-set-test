@@ -11,12 +11,12 @@ fn main() {
     // holds runtime thread until end of main fn.
     let (_tx, rx) = oneshot::channel::<()>();
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("failed to create runtime.");
-
     thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("failed to create runtime.");
+
         LOCAL_SET.with(|local_set| {
             local_set.block_on(&rt, async move {
                 let _ = rx.await;
