@@ -1,26 +1,42 @@
-use std::thread;
 use std::time::Duration;
 
-use tokio::runtime::Runtime;
-use tokio::task::LocalSet;
-use tokio::time::sleep;
+use crate::rt::Runtime;
+use futures::channel::oneshot;
+use tokio::time::timeout;
 
-thread_local! {
-    static LOCAL_SET: LocalSet = LocalSet::new();
-}
+mod local_worker;
+mod rt;
 
-async fn sleep_once() {
-    sleep(Duration::ZERO).await;
-}
+// async fn sleep_once() {
+//     sleep(Duration::ZERO).await;
+// }
 
 #[tokio::main]
 async fn main() {
-    let rt = Runtime::new().expect("failed to create runtime.");
+    let runtime = Runtime::new(2).expect("failed to create runtime.");
 
-    thread::spawn(move || {
-        LOCAL_SET.with(move |local_set| {
-            local_set.spawn_local(sleep_once());
-            local_set.block_on(&rt, sleep_once());
-        });
+    let (tx1, rx1) = oneshot::channel();
+    let (tx2, rx2) = oneshot::channel();
+
+    runtime.spawn_pinned(move || async move {
+        tx1.send(std::thread::current().id())
+            .expect("failed to send!");
     });
+
+    runtime.spawn_pinned(move || async move {
+        tx2.send(std::thread::current().id())
+            .expect("failed to send!");
+    });
+
+    let result1 = timeout(Duration::from_secs(5), rx1)
+        .await
+        .expect("task timed out")
+        .expect("failed to receive");
+    let result2 = timeout(Duration::from_secs(5), rx2)
+        .await
+        .expect("task timed out")
+        .expect("failed to receive");
+
+    // first task and second task are not on the same thread.
+    assert_ne!(result1, result2);
 }
