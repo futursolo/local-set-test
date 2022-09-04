@@ -1,11 +1,6 @@
 use std::thread;
 
 use tokio::sync::oneshot;
-use tokio::task::LocalSet;
-
-thread_local! {
-    static LOCAL_SET: LocalSet = LocalSet::new();
-}
 
 #[tokio::main]
 async fn main() {
@@ -17,10 +12,8 @@ async fn main() {
             .build()
             .expect("failed to create runtime.");
 
-        LOCAL_SET.with(|local_set| {
-            local_set.block_on(&rt, async move {
-                let _ = rx.await;
-            });
+        rt.block_on(async move {
+            let _ = rx.await;
         });
     });
 }
